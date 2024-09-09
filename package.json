@@ -1,0 +1,27 @@
+{
+  "name": "nodejs-windows-service",
+  "version": "1.0.0",
+  "description": "Node.js API running as a Windows service",
+  "main": "service.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "install-service": "node service.js install",
+    "uninstall-service": "node service.js uninstall",
+    "start-service": "node service.js start",
+    "stop-service": "node service.js stop",
+    "restart-service": "node service.js restart"
+  },
+  "dependencies": {
+    "node-windows": "1.0.0-beta.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kowts/nodejs-as-win-service.git"
+  },
+  "author": "kowts",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Kowts/nodejs-as-win-service/issues"
+  },
+  "homepage": "https://github.com/Kowts/nodejs-as-win-service#readme"
+}

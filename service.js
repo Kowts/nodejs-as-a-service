@@ -1,137 +1,220 @@
+// Import required modules
+const os = require('os');
+const { execSync } = require('child_process');
 const { Service, EventLogger } = require('node-windows');
 const path = require('path');
 const fs = require('fs');
 
-// Set up a logger for the service
+// Determine the current operating system platform (e.g., 'win32' for Windows, 'linux' for Linux)
+const platform = os.platform();
+
+// Set up a logger for logging events, specific to the service
 const log = new EventLogger('MyNodeApiService');
 
-// Get the directory where the script is located (assuming the API is in the same folder)
+// Define the path to the Node.js API script (e.g., app.js), assuming it's in the same directory as the service script
 const scriptPath = path.join(__dirname, 'app.js');
 
-// Check if the script file exists
+// Check if the API script file exists in the specified location
 if (!fs.existsSync(scriptPath)) {
-  log.error(`Error: Cannot find API script at ${scriptPath}`);
-  process.exit(1);
+    log.error(`Error: Cannot find API script at ${scriptPath}`);
+    process.exit(1); // Exit if the script does not exist
 }
 
-// Create a new service object
-const svc = new Service({
-  name: 'MyNodeApiService',
-  description: 'Node.js API running as a Windows service',
-  script: scriptPath,  // Automatically uses the current folder for the API
-  nodeOptions: [
-    '--harmony',
-    '--max_old_space_size=4096'
-  ],
-  env: {
-    name: 'NODE_ENV',
-    value: 'production'
-  },
-  // Set the service to automatically restart if it crashes
-  restartOnCrash: true,
-  logpath: path.join(__dirname, 'logs'),  // Specify a directory for logs
-  maxRetries: 3,  // Maximum number of restart attempts in case of failure
-  wait: 1,  // Wait 1 second before restarting on failure
-  grow: .5  // Increase wait time by 50% after each failure
-});
+// Function to manage services on Linux using systemd
+function manageLinuxService(action) {
+    const serviceName = 'mynodeapiservice'; // Define the Linux service name
 
-// Listen for the "install" event, which indicates the service is installed
-svc.on('install', () => {
-  log.info('Service successfully installed.');
-  svc.start();
-});
+    // Define the content of the systemd service configuration file
+    const systemdService = `
+        [Unit]
+        Description=Node.js API running as a Linux service
+        After=network.target
 
-// Listen for the "alreadyinstalled" event
-svc.on('alreadyinstalled', () => {
-  log.info('Service is already installed.');
-  svc.start();
-});
+        [Service]
+        ExecStart=/usr/bin/node ${scriptPath}  // Path to run the API script using node
+        Restart=on-failure                    // Automatically restart the service on failure
+        Environment=NODE_ENV=production       // Set environment variable for production mode
+        StandardOutput=syslog                 // Log standard output to syslog
+        StandardError=syslog                  // Log errors to syslog
+        SyslogIdentifier=${serviceName}       // Identifier for logs
 
-// Listen for the "start" event and log success
-svc.on('start', () => {
-  log.info('Service started successfully.');
-});
+        [Install]
+        WantedBy=multi-user.target
+    `;
 
-// Listen for the "stop" event
-svc.on('stop', () => {
-  log.warn('Service stopped.');
-});
+    // Define the path to store the systemd service configuration file
+    const serviceFilePath = `/etc/systemd/system/${serviceName}.service`;
 
-// Listen for the "restart" event
-svc.on('restart', () => {
-  log.info('Service restarted successfully.');
-});
+    try {
+        // Switch case to manage different actions (install, uninstall, start, stop, restart) on Linux
+        switch (action) {
+            case 'install':
+                // Write the systemd service configuration file
+                fs.writeFileSync(serviceFilePath, systemdService);
+                // Reload systemd, enable and start the service
+                execSync(`sudo systemctl daemon-reload`);
+                execSync(`sudo systemctl enable ${serviceName}`);
+                execSync(`sudo systemctl start ${serviceName}`);
+                log.info('Service successfully installed and started on Linux.');
+                break;
 
-// Listen for errors during service operations
-svc.on('error', (err) => {
-  log.error(`Service encountered an error: ${err}`);
-});
+            case 'uninstall':
+                // Stop and disable the service, then remove the service file
+                execSync(`sudo systemctl stop ${serviceName}`);
+                execSync(`sudo systemctl disable ${serviceName}`);
+                fs.unlinkSync(serviceFilePath); // Remove the service file
+                execSync(`sudo systemctl daemon-reload`);
+                log.info('Service successfully uninstalled on Linux.');
+                break;
 
-// Listen for the "uninstall" event
-svc.on('uninstall', () => {
-  log.info('Service uninstalled.');
-});
+            case 'start':
+                // Start the service
+                execSync(`sudo systemctl start ${serviceName}`);
+                log.info('Service started on Linux.');
+                break;
 
-// Handle command-line arguments
-const action = process.argv[2]; // Get the action from command-line (install, uninstall, start, stop, restart)
+            case 'stop':
+                // Stop the service
+                execSync(`sudo systemctl stop ${serviceName}`);
+                log.warn('Service stopped on Linux.');
+                break;
 
-switch (action) {
-  case 'install':
-    svc.exists((exists) => {
-      if (!exists) {
-        log.info('Installing the service...');
-        svc.install();
-      } else {
-        log.info('Service already installed.');
-      }
+            case 'restart':
+                // Restart the service
+                execSync(`sudo systemctl restart ${serviceName}`);
+                log.info('Service restarted on Linux.');
+                break;
+
+            default:
+                log.warn('Usage: node service.js <install|uninstall|start|stop|restart>');
+        }
+    } catch (error) {
+        log.error(`Error managing the service on Linux: ${error.message}`);
+    }
+}
+
+// Function to manage services on Windows using node-windows package
+function manageWindowsService(action) {
+    // Create a new service object with necessary configurations for Windows
+    const svc = new Service({
+        name: 'MyNodeApiService', // The name of the service
+        description: 'Node.js API running as a Windows service', // Service description
+        script: scriptPath, // Path to the API script (e.g., app.js)
+        nodeOptions: [
+            '--harmony', // Enable Harmony features in Node.js
+            '--max_old_space_size=4096' // Increase memory limit
+        ],
+        env: {
+            name: 'NODE_ENV',
+            value: 'production' // Set environment variable to production
+        },
+        restartOnCrash: true, // Automatically restart the service on crash
+        logpath: path.join(__dirname, 'logs'), // Path to store log files
+        maxRetries: 3, // Maximum number of restart attempts
+        wait: 1, // Wait 1 second before restarting
+        grow: 0.5 // Increase wait time by 50% after each failure
     });
-    break;
 
-  case 'uninstall':
-    svc.exists((exists) => {
-      if (exists) {
-        log.info('Uninstalling the service...');
-        svc.uninstall();
-      } else {
-        log.info('Service is not installed.');
-      }
+    // Event listeners for different service actions on Windows
+    svc.on('install', () => {
+        log.info('Service successfully installed on Windows.');
+        svc.start(); // Start service after installation
     });
-    break;
 
-  case 'start':
-    svc.exists((exists) => {
-      if (exists) {
-        log.info('Starting the service...');
-        svc.start();
-      } else {
-        log.error('Service is not installed.');
-      }
+    svc.on('alreadyinstalled', () => {
+        log.info('Service is already installed on Windows.');
+        svc.start(); // Start service if already installed
     });
-    break;
 
-  case 'stop':
-    svc.exists((exists) => {
-      if (exists) {
-        log.warn('Stopping the service...');
-        svc.stop();
-      } else {
-        log.error('Service is not installed.');
-      }
+    svc.on('start', () => {
+        log.info('Service started on Windows.');
     });
-    break;
 
-  case 'restart':
-    svc.exists((exists) => {
-      if (exists) {
-        log.info('Restarting the service...');
-        svc.restart();
-      } else {
-        log.error('Service is not installed.');
-      }
+    svc.on('stop', () => {
+        log.warn('Service stopped on Windows.');
     });
-    break;
 
-  default:
-    log.warn('Usage: node service.js <install|uninstall|start|stop|restart>');
-    break;
+    svc.on('restart', () => {
+        log.info('Service restarted on Windows.');
+    });
+
+    svc.on('uninstall', () => {
+        log.info('Service uninstalled on Windows.');
+    });
+
+    svc.on('error', (err) => {
+        log.error(`Service encountered an error on Windows: ${err}`);
+    });
+
+    // Switch case to manage different actions (install, uninstall, start, stop, restart) on Windows
+    switch (action) {
+        case 'install':
+            svc.exists((exists) => {
+                if (!exists) {
+                    log.info('Installing the service on Windows...');
+                    svc.install(); // Install the service if it doesn't exist
+                } else {
+                    log.info('Service already installed on Windows.');
+                }
+            });
+            break;
+
+        case 'uninstall':
+            svc.exists((exists) => {
+                if (exists) {
+                    log.info('Uninstalling the service on Windows...');
+                    svc.uninstall(); // Uninstall the service if it exists
+                } else {
+                    log.info('Service is not installed on Windows.');
+                }
+            });
+            break;
+
+        case 'start':
+            svc.exists((exists) => {
+                if (exists) {
+                    log.info('Starting the service on Windows...');
+                    svc.start(); // Start the service if installed
+                } else {
+                    log.error('Service is not installed on Windows.');
+                }
+            });
+            break;
+
+        case 'stop':
+            svc.exists((exists) => {
+                if (exists) {
+                    log.warn('Stopping the service on Windows...');
+                    svc.stop(); // Stop the service if installed
+                } else {
+                    log.error('Service is not installed on Windows.');
+                }
+            });
+            break;
+
+        case 'restart':
+            svc.exists((exists) => {
+                if (exists) {
+                    log.info('Restarting the service on Windows...');
+                    svc.restart(); // Restart the service if installed
+                } else {
+                    log.error('Service is not installed on Windows.');
+                }
+            });
+            break;
+
+        default:
+            log.warn('Usage: node service.js <install|uninstall|start|stop|restart>');
+    }
+}
+
+// Handle command-line arguments to decide the action (install, uninstall, start, stop, restart)
+const action = process.argv[2];
+
+if (platform === 'win32') {
+    manageWindowsService(action); // Run Windows service management
+} else if (platform === 'linux') {
+    manageLinuxService(action); // Run Linux service management
+} else {
+    log.error('Unsupported platform. This script only works on Windows or Linux.');
 }

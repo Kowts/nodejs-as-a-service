@@ -117,8 +117,7 @@ function manageLinuxService(action) {
         SyslogIdentifier=${serviceName}
 
         [Install]
-        WantedBy=multi-user.target
-    `;
+        WantedBy=multi-user.target`;
 
     const serviceFilePath = `/etc/systemd/system/${serviceName}.service`;
 

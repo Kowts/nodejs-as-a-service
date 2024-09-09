@@ -21,40 +21,40 @@ This project provides a simple script to run a Node.js API as a Windows service 
 2. Install the required dependencies:
 
 ```bash
-npm install node-windows
+npm install
 ```
 3. Ensure that your Node.js API script (app.js or another entry point) is located in the same directory as service.js.
 
-## Usage
+## Usage and Feature
 
 ### Install the Service
 To install the Node.js API as a Windows service, run the following command in your terminal:
 ```bash
-node service.js install
+npm run install-service
 ```
-This will install the service and automatically start it.
 
 ### Uninstall the Service
 To uninstall the service, use:
 ```bash
-
-node service.js uninstall
+npm run uninstall-service
 ```
+
 ### Start the Service
 To manually start the service if it's installed:
 ```bash
-node service.js start
+npm run start-service
 ```
+
 ### Stop the Service
 To manually stop the service:
 ```bash
-node service.js stop
+npm run stop-service
 ```
 
 ### Restart the Service
 To restart the service:
 ```bash
-node service.js restart
+npm run restart-service
 ```
 
 ## Logs

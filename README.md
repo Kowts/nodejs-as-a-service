@@ -24,6 +24,24 @@ This project provides a simple solution to run a Node.js API as a system service
 npm install
 ```
 3. Ensure your Node.js API script (e.g., `app.js`) is located in the same directory as `service.js`.
+4. Create a config.json file in the same directory as service.js with the following structure:
+```json
+{
+  "serviceName": "MyNodeApiService",
+  "description": "Node.js API running as a system service",
+  "scriptPath": "app.js",
+  "nodeOptions": ["--harmony", "--max_old_space_size=4096"],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "logPath": "logs",
+  "retryStrategy": {
+    "maxRetries": 3,
+    "wait": 1,
+    "grow": 0.5
+  }
+}
+```
 
 ## Usage and Feature
 
@@ -33,7 +51,7 @@ To install the Node.js API as a system service:
 ```bash
 npm run install-service
 ```
-- Linux:
+- Linux and macOS:
 ```bash
 sudo node service.js install
 ```
@@ -44,7 +62,7 @@ To uninstall the service, use:
 ```bash
 npm run uninstall-service
 ```
-- Linux:
+- Linux and macOS:
 ```bash
 sudo node service.js uninstall
 ```
@@ -55,7 +73,7 @@ To manually start the service if it's installed:
 ```bash
 npm run start-service
 ```
-- Linux:
+- Linux and macOS:
 ```bash
 sudo node service.js start
 ```
@@ -66,30 +84,42 @@ To manually stop the service:
 ```bash
 npm run stop-service
 ```
-- Linux:
+- Linux and macOS:
 ```bash
 sudo node service.js stop
 ```
 
 ### Restart the Service
-- Windows
 To restart the service:
+- Windows
 ```bash
 npm run restart-service
 ```
-- Linux:
+- Linux and macOS:
 ```bash
 sudo node service.js restart
+```
+
+### Check Service Status
+To check the status of the service:
+- Windows:
+```bash
+npm run status-service
+```
+- Linux and macOS:
+```bash
+sudo node service.js status
 ```
 
 ## Logs
 
 Logs will be saved in the logs directory (created automatically in the same folder as service.js).
 - Windows: Logs will be written to the Event Viewer under Applications and Services Logs > `MyNodeApiService`.
-- Linux: Logs will be accessible using the `journalctl` command, e.g.,
+- Linux and macOS: Logs will be accessible using the `journalctl` command, e.g.,
 ```bash
 sudo journalctl -u mynodeapiservice
 ```
+- macOS: Logs will be saved in `/var/log/` directory as `MyNodeApiService.log` and `MyNodeApiService.error.log`.
 Additionally, a log directory is created in the same folder as `service.js`, where logs are saved for both platforms.
 
 ## Error Handling
@@ -98,7 +128,7 @@ If the service crashes, it will attempt to restart automatically up to 3 times, 
 
 ### Customization
 
-You can modify the service configuration (e.g., service name, description, environment variables) inside the `service.js` file to fit your needs.
+You can modify the service configuration (e.g., service name, description, environment variables) inside the `config.json` file to fit your needs.
 
 ## License
 

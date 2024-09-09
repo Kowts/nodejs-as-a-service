@@ -1,57 +1,131 @@
-// Import required modules
 const os = require('os');
 const { execSync } = require('child_process');
 const { Service, EventLogger } = require('node-windows');
 const path = require('path');
 const fs = require('fs');
 
-// Determine the current operating system platform (e.g., 'win32' for Windows, 'linux' for Linux)
-const platform = os.platform();
+// Load configuration file
+const configPath = path.join(__dirname, 'config.json');
 
-// Set up a logger for logging events, specific to the service
-const log = new EventLogger('MyNodeApiService');
-
-// Define the path to the Node.js API script (e.g., app.js), assuming it's in the same directory as the service script
-const scriptPath = path.join(__dirname, 'app.js');
-
-// Check if the API script file exists in the specified location
-if (!fs.existsSync(scriptPath)) {
-    log.error(`Error: Cannot find API script at ${scriptPath}`);
-    process.exit(1); // Exit if the script does not exist
+// Check if the configuration file exists
+if (!fs.existsSync(configPath)) {
+    console.error('Error: Configuration file not found.');
+    process.exit(1);
 }
 
-// Function to manage services on Linux using systemd
-function manageLinuxService(action) {
-    const serviceName = 'mynodeapiservice'; // Define the Linux service name
+// Load configuration from the file
+const config = require(configPath);
+const platform = os.platform();
+const log = new EventLogger(config.serviceName);
 
-    // Define the content of the systemd service configuration file
+// Resolve the script path from configuration
+const scriptPath = path.resolve(__dirname, config.scriptPath);
+
+// Check if the script file exists
+if (!fs.existsSync(scriptPath)) {
+    log.error(`Error: Cannot find API script at ${scriptPath}`);
+    process.exit(1);
+}
+
+/**
+ * Manages services on macOS using launchd.
+ * @param {string} action - The action to perform (install, uninstall, start, stop, restart).
+ */
+function manageMacService(action) {
+    const plistFilePath = `/Library/LaunchDaemons/com.${config.serviceName}.plist`;
+
+    // Define the launchd plist configuration
+    const launchdPlist = `
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>com.${config.serviceName}</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>/usr/local/bin/node</string>
+                <string>${scriptPath}</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>StandardOutPath</key>
+            <string>/var/log/${config.serviceName}.log</string>
+            <key>StandardErrorPath</key>
+            <string>/var/log/${config.serviceName}.error.log</string>
+        </dict>
+    </plist>
+    `;
+
+    try {
+        switch (action) {
+            case 'install':
+                fs.writeFileSync(plistFilePath, launchdPlist);
+                execSync(`sudo launchctl load -w ${plistFilePath}`);
+                log.info('Service successfully installed and started on macOS.');
+                break;
+
+            case 'uninstall':
+                execSync(`sudo launchctl unload -w ${plistFilePath}`);
+                fs.unlinkSync(plistFilePath);
+                log.info('Service successfully uninstalled on macOS.');
+                break;
+
+            case 'start':
+                execSync(`sudo launchctl start com.${config.serviceName}`);
+                log.info('Service started on macOS.');
+                break;
+
+            case 'stop':
+                execSync(`sudo launchctl stop com.${config.serviceName}`);
+                log.warn('Service stopped on macOS.');
+                break;
+
+            case 'restart':
+                execSync(`sudo launchctl stop com.${config.serviceName}`);
+                execSync(`sudo launchctl start com.${config.serviceName}`);
+                log.info('Service restarted on macOS.');
+                break;
+
+            default:
+                log.warn('Usage: node service.js <install|uninstall|start|stop|restart>');
+        }
+    } catch (error) {
+        log.error(`Error managing the service on macOS: ${error.message}`);
+    }
+}
+
+/**
+ * Manages services on Linux using systemd.
+ * @param {string} action - The action to perform (install, uninstall, start, stop, restart).
+ */
+function manageLinuxService(action) {
+    const serviceName = config.serviceName.toLowerCase();
+
+    // Define the systemd service configuration
     const systemdService = `
         [Unit]
-        Description=Node.js API running as a Linux service
+        Description=${config.description}
         After=network.target
 
         [Service]
-        ExecStart=/usr/bin/node ${scriptPath}  // Path to run the API script using node
-        Restart=on-failure                    // Automatically restart the service on failure
-        Environment=NODE_ENV=production       // Set environment variable for production mode
-        StandardOutput=syslog                 // Log standard output to syslog
-        StandardError=syslog                  // Log errors to syslog
-        SyslogIdentifier=${serviceName}       // Identifier for logs
+        ExecStart=/usr/bin/node ${scriptPath}
+        Restart=on-failure
+        Environment=NODE_ENV=${config.env.NODE_ENV}
+        StandardOutput=syslog
+        StandardError=syslog
+        SyslogIdentifier=${serviceName}
 
         [Install]
         WantedBy=multi-user.target
     `;
 
-    // Define the path to store the systemd service configuration file
     const serviceFilePath = `/etc/systemd/system/${serviceName}.service`;
 
     try {
-        // Switch case to manage different actions (install, uninstall, start, stop, restart) on Linux
         switch (action) {
             case 'install':
-                // Write the systemd service configuration file
                 fs.writeFileSync(serviceFilePath, systemdService);
-                // Reload systemd, enable and start the service
                 execSync(`sudo systemctl daemon-reload`);
                 execSync(`sudo systemctl enable ${serviceName}`);
                 execSync(`sudo systemctl start ${serviceName}`);
@@ -59,28 +133,24 @@ function manageLinuxService(action) {
                 break;
 
             case 'uninstall':
-                // Stop and disable the service, then remove the service file
                 execSync(`sudo systemctl stop ${serviceName}`);
                 execSync(`sudo systemctl disable ${serviceName}`);
-                fs.unlinkSync(serviceFilePath); // Remove the service file
+                fs.unlinkSync(serviceFilePath);
                 execSync(`sudo systemctl daemon-reload`);
                 log.info('Service successfully uninstalled on Linux.');
                 break;
 
             case 'start':
-                // Start the service
                 execSync(`sudo systemctl start ${serviceName}`);
                 log.info('Service started on Linux.');
                 break;
 
             case 'stop':
-                // Stop the service
                 execSync(`sudo systemctl stop ${serviceName}`);
                 log.warn('Service stopped on Linux.');
                 break;
 
             case 'restart':
-                // Restart the service
                 execSync(`sudo systemctl restart ${serviceName}`);
                 log.info('Service restarted on Linux.');
                 break;
@@ -93,37 +163,32 @@ function manageLinuxService(action) {
     }
 }
 
-// Function to manage services on Windows using node-windows package
+/**
+ * Manages services on Windows using node-windows.
+ * @param {string} action - The action to perform (install, uninstall, start, stop, restart).
+ */
 function manageWindowsService(action) {
-    // Create a new service object with necessary configurations for Windows
     const svc = new Service({
-        name: 'MyNodeApiService', // The name of the service
-        description: 'Node.js API running as a Windows service', // Service description
-        script: scriptPath, // Path to the API script (e.g., app.js)
-        nodeOptions: [
-            '--harmony', // Enable Harmony features in Node.js
-            '--max_old_space_size=4096' // Increase memory limit
-        ],
-        env: {
-            name: 'NODE_ENV',
-            value: 'production' // Set environment variable to production
-        },
-        restartOnCrash: true, // Automatically restart the service on crash
-        logpath: path.join(__dirname, 'logs'), // Path to store log files
-        maxRetries: 3, // Maximum number of restart attempts
-        wait: 1, // Wait 1 second before restarting
-        grow: 0.5 // Increase wait time by 50% after each failure
+        name: config.serviceName,
+        description: config.description,
+        script: scriptPath,
+        nodeOptions: config.nodeOptions,
+        env: config.env,
+        restartOnCrash: true,
+        logpath: path.join(__dirname, config.logPath),
+        maxRetries: config.retryStrategy.maxRetries,
+        wait: config.retryStrategy.wait,
+        grow: config.retryStrategy.grow
     });
 
-    // Event listeners for different service actions on Windows
     svc.on('install', () => {
         log.info('Service successfully installed on Windows.');
-        svc.start(); // Start service after installation
+        svc.start();
     });
 
     svc.on('alreadyinstalled', () => {
         log.info('Service is already installed on Windows.');
-        svc.start(); // Start service if already installed
+        svc.start();
     });
 
     svc.on('start', () => {
@@ -146,13 +211,12 @@ function manageWindowsService(action) {
         log.error(`Service encountered an error on Windows: ${err}`);
     });
 
-    // Switch case to manage different actions (install, uninstall, start, stop, restart) on Windows
     switch (action) {
         case 'install':
             svc.exists((exists) => {
                 if (!exists) {
                     log.info('Installing the service on Windows...');
-                    svc.install(); // Install the service if it doesn't exist
+                    svc.install();
                 } else {
                     log.info('Service already installed on Windows.');
                 }
@@ -163,7 +227,7 @@ function manageWindowsService(action) {
             svc.exists((exists) => {
                 if (exists) {
                     log.info('Uninstalling the service on Windows...');
-                    svc.uninstall(); // Uninstall the service if it exists
+                    svc.uninstall();
                 } else {
                     log.info('Service is not installed on Windows.');
                 }
@@ -174,7 +238,7 @@ function manageWindowsService(action) {
             svc.exists((exists) => {
                 if (exists) {
                     log.info('Starting the service on Windows...');
-                    svc.start(); // Start the service if installed
+                    svc.start();
                 } else {
                     log.error('Service is not installed on Windows.');
                 }
@@ -185,7 +249,7 @@ function manageWindowsService(action) {
             svc.exists((exists) => {
                 if (exists) {
                     log.warn('Stopping the service on Windows...');
-                    svc.stop(); // Stop the service if installed
+                    svc.stop();
                 } else {
                     log.error('Service is not installed on Windows.');
                 }
@@ -196,7 +260,7 @@ function manageWindowsService(action) {
             svc.exists((exists) => {
                 if (exists) {
                     log.info('Restarting the service on Windows...');
-                    svc.restart(); // Restart the service if installed
+                    svc.restart();
                 } else {
                     log.error('Service is not installed on Windows.');
                 }
@@ -208,13 +272,48 @@ function manageWindowsService(action) {
     }
 }
 
-// Handle command-line arguments to decide the action (install, uninstall, start, stop, restart)
-const action = process.argv[2];
+/**
+ * Checks the status of the service based on the platform.
+ */
+function checkServiceStatus() {
+    if (platform === 'win32') {
+        // Windows: Check service status using `sc query`
+        try {
+            const status = execSync(`sc query ${config.serviceName}`).toString();
+            log.info(`Service status on Windows: ${status}`);
+        } catch (error) {
+            log.error(`Error checking service status on Windows: ${error.message}`);
+        }
+    } else if (platform === 'linux') {
+        // Linux: Check service status using `systemctl`
+        try {
+            const status = execSync(`systemctl status ${config.serviceName.toLowerCase()}`).toString();
+            log.info(`Service status on Linux: ${status}`);
+        } catch (error) {
+            log.error(`Error checking service status on Linux: ${error.message}`);
+        }
+    } else if (platform === 'darwin') {
+        // macOS: Check service status using `launchctl`
+        try {
+            const status = execSync(`launchctl list | grep com.${config.serviceName}`).toString();
+            log.info(`Service status on macOS: ${status}`);
+        } catch (error) {
+            log.error(`Error checking service status on macOS: ${error.message}`);
+        }
+    }
+}
 
-if (platform === 'win32') {
-    manageWindowsService(action); // Run Windows service management
+// Handle command-line arguments
+const action = process.argv[2]; // Get the action from command-line arguments (install, uninstall, start, stop, restart, status)
+
+if (action === 'status') {
+    checkServiceStatus();
+} else if (platform === 'win32') {
+    manageWindowsService(action);
 } else if (platform === 'linux') {
-    manageLinuxService(action); // Run Linux service management
+    manageLinuxService(action);
+} else if (platform === 'darwin') {
+    manageMacService(action);
 } else {
-    log.error('Unsupported platform. This script only works on Windows or Linux.');
+    log.error('Unsupported platform. This script only works on Windows, Linux, or macOS.');
 }

@@ -1,0 +1,18 @@
+{
+    "serviceName": "MyNodeApiService",
+    "description": "Node.js API running as a cross-platform service",
+    "scriptPath": "./app.js",
+    "nodeOptions": [
+      "--harmony",
+      "--max_old_space_size=4096"
+    ],
+    "env": {
+      "NODE_ENV": "production"
+    },
+    "logPath": "./logs",
+    "retryStrategy": {
+      "maxRetries": 3,
+      "wait": 1,
+      "grow": 0.5
+    }
+  }
